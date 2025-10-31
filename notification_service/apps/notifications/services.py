@@ -1,99 +1,41 @@
-import logging
+from typing import List, Optional
 
-from django.db import models, transaction
+from django.db import transaction
 
-from .gateways import DeliveryService
-from .models import Notification, OutboxMessage
-
-logger = logging.getLogger(__name__)
+from .models import Notification, OutboxMessage, NotificationMethod
 
 
-class OutboxService:
-    """Сервис для работы с Outbox сообщениями"""
-
-    def __init__(self):
-        self.delivery_service = DeliveryService()
-
+class NotificationService:
     @transaction.atomic
-    def create_notification_with_outbox(self, user_id, title, message, notification_type='INFO', delivery_methods=None):
-        """Создание уведомления и outbox сообщений в одной транзакции"""
-        if delivery_methods is None:
-            delivery_methods = ['EMAIL', 'SMS', 'TELEGRAM']
+    def create_notification(self, user_id: int, title: str, message: str, methods: Optional[List[str]] = None):
+        if not methods:
+            methods = [NotificationMethod.SMS]
 
         notification = Notification.objects.create(
             user_id=user_id,
             title=title,
-            message=message,
-            notification_type=notification_type
+            message=message
         )
 
-        # Получаем данные пользователя (заглушка)
-        user_data = self._get_user_data(user_id)
+        user_data = {
+            1: {"email": "test1@mail.ru", "phone": "+79001234567", "telegram_chat_id": "123456789"},
+            2: {"email": "test2@mail.ru", "phone": "+79007654321", "telegram_chat_id": "987654321"},
+        }.get(user_id, {})
 
-        outbox_messages = []
-        for method in delivery_methods:
-            outbox_message = OutboxMessage.objects.create(
-                notification=notification,
-                method=method,
-                payload=self._build_payload(method, notification, user_data)
-            )
-            outbox_messages.append(outbox_message)
+        OutboxMessage.objects.create(
+            notification=notification,
+            method=methods[0],
+            payload=self._build_payload(methods[0], notification, user_data)
+        )
 
-        return notification, outbox_messages
+        return notification
 
-    def _get_user_data(self, user_id):
-        """Получение данных пользователя - ТЕСТОВЫЕ ДАННЫЕ"""
-        test_users = {
-            1: {
-                'email': 'kapitan_kub@mail.ru',
-                'phone': '+79085898807',
-                'telegram_chat_id': '7722429828'
-            },
-            2: {
-                'email': 'user2@example.com',
-                'phone': '+79160000001',
-            },
-        }
-
-        return test_users.get(user_id, {
-            'email': f'user{user_id}@example.com',
-            'phone': '+79160000000',
-            'telegram_chat_id': None
-        })
-
-    def _build_payload(self, method, notification, user_data):
-        """Построение payload для разных методов доставки"""
-
-        if method == 'EMAIL':
-            payload = {
-                'to_email': user_data['email'],
-                'subject': notification.title,
-                'message': notification.message
-            }
-
-            return payload
-
-        elif method == 'SMS':
-            payload = {
-                'phone': user_data['phone'],
-                'message': f"{notification.title}: {notification.message}"
-            }
-
-            return payload
-
-        elif method == 'TELEGRAM':
-            payload = {
-                'chat_id': user_data['telegram_chat_id'],
-                'message': f"*{notification.title}*\n{notification.message}"
-            }
-
-            return payload
-
+    def _build_payload(self, method: str, notification: Notification, user_data: dict):
+        if method == NotificationMethod.EMAIL:
+            return {"to_email": user_data.get("email"), "subject": notification.title, "message": notification.message}
+        elif method == NotificationMethod.SMS:
+            return {"phone": user_data.get("phone"), "message": f"{notification.title}: {notification.message}"}
+        elif method == NotificationMethod.TELEGRAM:
+            return {"chat_id": user_data.get("telegram_chat_id"),
+                    "message": f"*{notification.title}*\n{notification.message}"}
         return {}
-
-    def get_pending_messages(self, limit=100):
-        """Получить ожидающие обработки сообщения"""
-        return OutboxMessage.objects.filter(
-            status__in=['PENDING', 'FAILED'],
-            attempt_count__lt=models.F('max_retries')
-        ).select_related('notification')[:limit]

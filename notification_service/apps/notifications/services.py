@@ -1,24 +1,17 @@
-import logging
+import os
 
-from django.db import models, transaction
-
-from .gateways import DeliveryService
+from django.conf import settings
+from django.db import transaction
 from .models import Notification, OutboxMessage
+from .gateways import DeliveryService
 
-logger = logging.getLogger(__name__)
 
-
-class OutboxService:
-    """Сервис для работы с Outbox сообщениями"""
-
-    def __init__(self):
-        self.delivery_service = DeliveryService()
+class NotificationService:
 
     @transaction.atomic
-    def create_notification_with_outbox(self, user_id, title, message, notification_type='INFO', delivery_methods=None):
-        """Создание уведомления и outbox сообщений в одной транзакции"""
-        if delivery_methods is None:
-            delivery_methods = ['EMAIL', 'SMS', 'TELEGRAM']
+    def create_with_fallback(self, user_id, title, message, notification_type='INFO', methods=None):
+        if methods is None:
+            methods = ['EMAIL', 'SMS', 'TELEGRAM']
 
         notification = Notification.objects.create(
             user_id=user_id,
@@ -27,73 +20,68 @@ class OutboxService:
             notification_type=notification_type
         )
 
-        # Получаем данные пользователя (заглушка)
-        user_data = self._get_user_data(user_id)
-
-        outbox_messages = []
-        for method in delivery_methods:
-            outbox_message = OutboxMessage.objects.create(
+        for method in methods:
+            OutboxMessage.objects.create(
                 notification=notification,
                 method=method,
-                payload=self._build_payload(method, notification, user_data)
+                status='PENDING'
             )
-            outbox_messages.append(outbox_message)
 
-        return notification, outbox_messages
+        return notification
+
+    def process_fallback_delivery(self, notification):
+        outbox_messages = notification.outboxmessage_set.all()
+
+        for outbox_msg in outbox_messages:
+            if outbox_msg.status == 'SENT':
+                continue
+
+            success = self._try_send(outbox_msg)
+            if success:
+                # Помечаем все как отправленные
+                notification.outboxmessage_set.update(status='SENT')
+                return True
+
+        return False
+
+    def _try_send(self, outbox_msg):
+        user_data = self._get_user_data(outbox_msg.notification.user_id)
+        payload = self._build_payload(outbox_msg.method, outbox_msg.notification, user_data)
+
+        success = DeliveryService().send_via_method(
+            outbox_msg.method,
+            outbox_msg.notification,
+            payload
+        )
+
+        outbox_msg.attempt_count += 1
+        outbox_msg.status = 'SENT' if success else 'FAILED'
+        outbox_msg.save()
+
+        return success
 
     def _get_user_data(self, user_id):
-        """Получение данных пользователя - ТЕСТОВЫЕ ДАННЫЕ"""
         test_users = {
-            1: {
-                'email': 'kapitan_kub@mail.ru',
-                'phone': '+79085898807',
-                'telegram_chat_id': '7722429828'
-            },
-            2: {
-                'email': 'user2@example.com',
-                'phone': '+79160000001',
-            },
+            1: {'email': os.getenv("EMAIL_HOST_USER"), 'phone': '+79001234567', 'telegram_chat_id': os.getenv("CHAT_ID")},
+            2: {'email': 'test2@mail.ru', 'phone': '+79007654321', 'telegram_chat_id': '987654321'},
         }
-
-        return test_users.get(user_id, {
-            'email': f'user{user_id}@example.com',
-            'phone': '+79160000000',
-            'telegram_chat_id': None
-        })
+        return test_users.get(user_id, {})
 
     def _build_payload(self, method, notification, user_data):
-        """Построение payload для разных методов доставки"""
-
         if method == 'EMAIL':
-            payload = {
-                'to_email': user_data['email'],
+            return {
+                'to_email': user_data.get('email', os.getenv("EMAIL_HOST_USER")),
                 'subject': notification.title,
                 'message': notification.message
             }
-
-            return payload
-
         elif method == 'SMS':
-            payload = {
-                'phone': user_data['phone'],
+            return {
+                'phone': user_data.get('phone', '+79000000000'),
                 'message': f"{notification.title}: {notification.message}"
             }
-
-            return payload
-
         elif method == 'TELEGRAM':
-            payload = {
-                'chat_id': user_data['telegram_chat_id'],
+            return {
+                'chat_id': user_data.get('telegram_chat_id', os.getenv("CHAT_ID")),
                 'message': f"*{notification.title}*\n{notification.message}"
             }
-
-            return payload
-
         return {}
-
-    def get_pending_messages(self, limit=100):
-        """Получить ожидающие обработки сообщения"""
-        return OutboxMessage.objects.filter(
-            status__in=['PENDING', 'FAILED'],
-            attempt_count__lt=models.F('max_retries')
-        ).select_related('notification')[:limit]

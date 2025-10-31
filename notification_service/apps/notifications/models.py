@@ -1,5 +1,6 @@
 from django.db import models
-from .constants import NOTIFICATION_TYPES, DELIVERY_METHODS, NOTIFICATION_STATUS
+
+from .constants import DELIVERY_METHODS, NOTIFICATION_STATUS, NOTIFICATION_TYPES
 
 
 class BaseModel(models.Model):
@@ -15,13 +16,11 @@ class Notification(BaseModel):
     title = models.CharField(max_length=200)
     message = models.TextField()
     notification_type = models.CharField(
-        max_length=20,
-        choices=NOTIFICATION_TYPES,
-        default='INFO'
+        max_length=20, choices=NOTIFICATION_TYPES, default="INFO"
     )
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.title} (user: {self.user_id})"
@@ -31,11 +30,9 @@ class OutboxMessage(BaseModel):
     notification = models.ForeignKey(Notification, on_delete=models.CASCADE)
     method = models.CharField(max_length=20, choices=DELIVERY_METHODS)
     status = models.CharField(
-        max_length=20,
-        choices=NOTIFICATION_STATUS,
-        default='PENDING'
+        max_length=20, choices=NOTIFICATION_STATUS, default="PENDING"
     )
     attempt_count = models.IntegerField(default=0)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]

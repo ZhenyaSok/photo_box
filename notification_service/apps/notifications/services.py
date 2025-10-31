@@ -1,6 +1,6 @@
 import os
+import time
 
-from django.conf import settings
 from django.db import transaction
 from .models import Notification, OutboxMessage
 from .gateways import DeliveryService
@@ -36,29 +36,42 @@ class NotificationService:
             if outbox_msg.status == 'SENT':
                 continue
 
-            success = self._try_send(outbox_msg)
+            success = self._try_send(outbox_msg, max_retries=3)
+
             if success:
-                # Помечаем все как отправленные
                 notification.outboxmessage_set.update(status='SENT')
                 return True
 
         return False
 
-    def _try_send(self, outbox_msg):
+    def _try_send(self, outbox_msg, max_retries=3):
+        """Упрощенная версия с повторными попытками без try/except"""
         user_data = self._get_user_data(outbox_msg.notification.user_id)
         payload = self._build_payload(outbox_msg.method, outbox_msg.notification, user_data)
 
-        success = DeliveryService().send_via_method(
-            outbox_msg.method,
-            outbox_msg.notification,
-            payload
-        )
+        for attempt in range(max_retries):
+            success = DeliveryService().send_via_method(
+                outbox_msg.method,
+                outbox_msg.notification,
+                payload
+            )
 
-        outbox_msg.attempt_count += 1
-        outbox_msg.status = 'SENT' if success else 'FAILED'
+            if success:
+                # УСПЕХ - сохраняем и возвращаем
+                outbox_msg.attempt_count = attempt + 1
+                outbox_msg.status = 'SENT'
+                outbox_msg.save()
+                return True
+            else:
+
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    time.sleep(delay)
+
+        outbox_msg.attempt_count = max_retries
+        outbox_msg.status = 'FAILED'
         outbox_msg.save()
-
-        return success
+        return False
 
     def _get_user_data(self, user_id):
         test_users = {

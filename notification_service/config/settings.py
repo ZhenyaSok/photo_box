@@ -159,6 +159,9 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_DEFAULT_QUEUE = "notifications"
 
+TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+TEST_DISCOVERY_ROOT = os.path.join(BASE_DIR, 'tests')
+
 # Email Config
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.getenv("EMAIL_HOST")

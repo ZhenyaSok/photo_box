@@ -1,8 +1,11 @@
+
 from typing import List, Optional
-
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
-from .models import Notification, OutboxMessage, NotificationMethod
+from .models import Notification, OutboxMessage, NotificationMethod, OutboxStatus
+from .gateways import DeliveryService
 
 
 class NotificationService:
@@ -17,18 +20,80 @@ class NotificationService:
             message=message
         )
 
+        user_data = self._get_user_data(user_id)
+
+        for method in methods:
+            OutboxMessage.objects.create(
+                notification=notification,
+                method=method,
+                payload=self._build_payload(method, notification, user_data)
+            )
+
+        return notification
+
+    def get_pending_messages(self, limit=50):
+        """Получение ожидающих сообщений"""
+        return OutboxMessage.objects.select_for_update(skip_locked=True).filter(
+            Q(status=OutboxStatus.PENDING) |
+            Q(status=OutboxStatus.ENQUEUED, status_changed_at__lte=timezone.now() - timezone.timedelta(minutes=1))
+        )[:limit]
+
+    def process_single_outbox_message(self, outbox_message_id):
+        """Обработка одного сообщения"""
+        try:
+            with transaction.atomic():
+                message = OutboxMessage.objects.select_for_update(skip_locked=True).filter(
+                    id=outbox_message_id,
+                    status=OutboxStatus.ENQUEUED
+                ).first()
+
+                if not message:
+                    return {"status": "skipped", "reason": "not_found"}
+
+                # Проверяем, не отправлено ли уже уведомление
+                if message.notification.is_sent:
+                    # Если уведомление уже отправлено, помечаем все связанные сообщения как отправленные
+                    OutboxMessage.objects.filter(notification=message.notification, status=OutboxStatus.ENQUEUED).update(status=OutboxStatus.SENT)
+                    return {"status": "sent", "reason": "already_sent"}
+
+                if not message.can_retry():
+                    message.mark_failed("Превышен лимит повторных попыток")
+                    message.create_fallback()
+                    return {"status": "failed", "reason": "retry_limit"}
+
+                message.start_processing()
+
+            success = DeliveryService().send_via_method(
+                message.method,
+                message.notification,
+                message.payload
+            )
+
+            with transaction.atomic():
+                message = OutboxMessage.objects.select_for_update().get(id=outbox_message_id)
+                if success:
+                    message.mark_success()
+                    # Помечаем все уведомление как отправленное
+                    message.notification.is_sent = True
+                    message.notification.save()
+                    return {"status": "sent", "method": message.method}
+                else:
+                    message.mark_failed(f"Не удалось отправить через {message.method}")
+                    raise Exception(f"Failed to send via {message.method}")
+
+        except Exception as e:
+            # Если это не ошибка отправки, пробрасываем дальше
+            if "Failed to send via" in str(e):
+                raise e
+            return {"status": "error", "reason": str(e)}
+
+    def _get_user_data(self, user_id: int):
+        """Получение данных пользователя"""
         user_data = {
             1: {"email": "test1@mail.ru", "phone": "+79001234567", "telegram_chat_id": "123456789"},
             2: {"email": "test2@mail.ru", "phone": "+79007654321", "telegram_chat_id": "987654321"},
-        }.get(user_id, {})
-
-        OutboxMessage.objects.create(
-            notification=notification,
-            method=methods[0],
-            payload=self._build_payload(methods[0], notification, user_data)
-        )
-
-        return notification
+        }
+        return user_data.get(user_id, {})
 
     def _build_payload(self, method: str, notification: Notification, user_data: dict):
         if method == NotificationMethod.EMAIL:

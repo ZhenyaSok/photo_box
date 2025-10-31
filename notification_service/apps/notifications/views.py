@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 
 from .models import Notification
 from .serializers import CreateNotificationSerializer, NotificationSerializer
@@ -14,7 +15,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             return CreateNotificationSerializer
         return NotificationSerializer
 
-    def create(self, request):
+    def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 

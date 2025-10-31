@@ -12,50 +12,42 @@ class EmailGateway:
     """Сервис отправки через email"""
 
     def send(self, notification, payload):
-        try:
-            recipient_email = payload.get("to_email", "kapitan_kub@mail.ru")
-            subject = payload.get("subject", notification.title)
-            message = payload.get("message", notification.message)
+        recipient_email = payload.get("to_email", "kapitan_kub@mail.ru")
+        subject = payload.get("subject", notification.title)
+        message = payload.get("message", notification.message)
 
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[recipient_email],
-                fail_silently=False,
-            )
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[recipient_email],
+            fail_silently=False,
+        )
 
-            return True
-
-        except Exception:
-            return False
+        return True
 
 
 class TelegramGateway:
     """Сервис отправки через ТГ"""
 
     def send(self, notification, payload):
-        try:
-            chat_id = os.getenv("CHAT_ID")
-            message = payload.get("message")
+        chat_id = os.getenv("CHAT_ID")
+        message = payload.get("message")
 
-            if not chat_id:
-                return False
-
-            bot_token = settings.TELEGRAM_BOT_TOKEN
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-
-            response = requests.post(
-                url,
-                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-                timeout=10,
-            )
-
-            success = response.status_code == 200
-            return success
-
-        except Exception:
+        if not chat_id:
             return False
+
+        bot_token = settings.TELEGRAM_BOT_TOKEN
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+        response = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            timeout=10,
+        )
+
+        success = response.status_code == 200
+        return success
 
 
 class SMSGateway:

@@ -5,16 +5,16 @@ from django.utils import timezone
 
 
 class OutboxStatus(models.TextChoices):
-    PENDING = 'PENDING', 'В ожидании'
-    ENQUEUED = 'ENQUEUED', 'В очереди'
-    SENT = 'SENT', 'Отправлено'
-    FAILED = 'FAILED', 'Не удалось'
+    PENDING = "PENDING", "В ожидании"
+    ENQUEUED = "ENQUEUED", "В очереди"
+    SENT = "SENT", "Отправлено"
+    FAILED = "FAILED", "Не удалось"
 
 
 class NotificationMethod(models.TextChoices):
-    SMS = 'SMS', 'SMS'
-    EMAIL = 'EMAIL', 'Email'
-    TELEGRAM = 'TELEGRAM', 'Telegram'
+    SMS = "SMS", "SMS"
+    EMAIL = "EMAIL", "Email"
+    TELEGRAM = "TELEGRAM", "Telegram"
 
 
 class BaseModel(models.Model):
@@ -36,9 +36,13 @@ class Notification(BaseModel):
 
 
 class OutboxMessage(BaseModel):
-    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='outbox_messages')
+    notification = models.ForeignKey(
+        Notification, on_delete=models.CASCADE, related_name="outbox_messages"
+    )
     method = models.CharField(max_length=20, choices=NotificationMethod.choices)
-    status = models.CharField(max_length=20, choices=OutboxStatus.choices, default=OutboxStatus.PENDING)
+    status = models.CharField(
+        max_length=20, choices=OutboxStatus.choices, default=OutboxStatus.PENDING
+    )
     payload = models.JSONField()
     attempt_count = models.IntegerField(default=0)
     max_retries = models.IntegerField(default=3)
@@ -46,7 +50,7 @@ class OutboxMessage(BaseModel):
     status_changed_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.method} - {self.status} (attempts: {self.attempt_count})"
@@ -70,7 +74,7 @@ class OutboxMessage(BaseModel):
         self.save()
 
     def get_next_fallback_method(self) -> Optional[str]:
-        methods = ['SMS', 'TELEGRAM', 'EMAIL']
+        methods = ["SMS", "TELEGRAM", "EMAIL"]
         try:
             current_index = methods.index(self.method)
             if current_index + 1 < len(methods):
@@ -86,6 +90,6 @@ class OutboxMessage(BaseModel):
                 notification=self.notification,
                 method=next_method,
                 status=OutboxStatus.PENDING,
-                payload=self.payload
+                payload=self.payload,
             )
         return None

@@ -1,17 +1,16 @@
-from rest_framework import viewsets, status
+from rest_framework import status, viewsets
 from rest_framework.response import Response
-from rest_framework.decorators import action
 
-from .models import Notification
-from .serializers import CreateNotificationSerializer, NotificationSerializer
-from .services import NotificationService
+from apps.notifications.models import Notification
+from apps.notifications.serializers import CreateNotificationSerializer, NotificationSerializer
+from apps.notifications.services import NotificationService
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all()
 
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.action == "create":
             return CreateNotificationSerializer
         return NotificationSerializer
 
@@ -23,13 +22,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
         service = NotificationService()
 
         notification = service.create_notification(
-            user_id=data['user_id'],
-            title=data['title'],
-            message=data['message'],
-            methods=data.get('delivery_methods', ['SMS'])
+            user_id=data["user_id"],
+            title=data["title"],
+            message=data["message"],
+            methods=data.get("delivery_methods", ["SMS"]),
         )
 
         return Response(
-            {'id': notification.id, 'status': 'created'},
-            status=status.HTTP_201_CREATED
+            {"id": notification.id, "status": "created"}, status=status.HTTP_201_CREATED
         )
